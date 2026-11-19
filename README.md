@@ -103,6 +103,7 @@ Trois harnais livrés avec le projet :
 
 - `bench_ram_swap.py` — micro-benchmark d'une version du module : coût d'une itération lecture+décision, détail des parses, latence d'une invocation complète. Accepte un chemin de module pour comparer deux versions : `python3 bench_ram_swap.py /chemin/vers/autre_ram_swap.py`
 - `bench_systeme.py` — benchmark système d'une configuration : hog de 4 Gio churné, latence de refault 4 KiB aléatoire sur une région poussée en swap par `MADV_PAGEOUT` (étalonnée contre la même tournée en RAM), échantillonnage du swappiness effectif et de la PSI à 0,5 s
+- `bench_reel.py` — benchmark d'usage réel : des applications d'arrière-plan (zone chaude réécrite souvent, zone froide abandonnée) occupent la RAM pendant que le harnais mesure les latences perçues : lancement d'un outil, sauvegarde d'un petit fichier (fsync), débit de lecture disque
 - `bench_recap.py` — synthèse agrégée des runs de `resultats/`
 
 ## Benchmark
@@ -195,6 +196,28 @@ Médianes des passes, 2 runs par configuration :
 ### Réserves
 
 2 runs × 2 passes par configuration : motif constant sur les quatre appariements, mais échantillon court. Le disque de swap est partagé avec la racine du conteneur, donc du bruit d'hôte est possible. Le test force un thrash que l'usage réel de cette machine dépasse rarement.
+
+### Usage réel : poste contraint, latences perçues
+
+Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe la RAM comme des applications ouvertes — chacune avec une zone chaude réécrite toutes les 150 ms et une zone froide abandonnée — et mesure 50 fois, toutes les 2 s, ce qu'un utilisateur ressent : lancement d'un interpréteur Python, sauvegarde d'un fichier de 64 Kio avec `fsync` sur l'eMMC, débit de lecture disque. Deux scénarios, deux paires entrelacées solution/natif, 50 échantillons par run.
+
+**Scénario modéré** — 2 applications × 600 Mio (~76 % de RAM, dispo restée à 22-26 %) :
+
+| Métrique (médiane) | Solution | Natif | Swap |
+|---|---|---|---|
+| Lancement outil | 53,3 ms | 50,3 ms | 0 / 0 |
+| Sauvegarde fsync | 12,5 ms | 14,4 ms | 0 / 0 |
+| Lecture disque | 680 Mio/s | 661 Mio/s | — |
+
+**Scénario chargé** — 3 applications × 500 Mio (~85 % de RAM, dispo 14-22 %) :
+
+| Métrique (médiane) | Solution | Natif | Swap |
+|---|---|---|---|
+| Lancement outil | 51,4 ms | 53,1 ms | 8 / 0 vs 2 / 0 Mio |
+| Sauvegarde fsync | 13,2 ms (p95 22,7) | 12,2 ms (p95 33,5, pic 194) | — |
+| Lecture disque | 620 Mio/s | 589 Mio/s | — |
+
+**Lecture.** Jusqu'à ~90 % de RAM occupée, aucune des deux configurations n'échange significativement et les latences perçues restent dans le bruit l'une de l'autre : le MGLRU du noyau 6.6 tient cette plage dans les deux cas. La solution ne dégrade rien au quotidien, et sa marge se joue en dessous — le régime de pénurie mesuré au benchmark système. Un détail notable : le run natif chargé finit avec la plus faible marge de RAM disponible (14,4 % contre 22,3 % pour la solution) et le seul pic de sauvegarde marqué (194 ms), à prendre comme indicateur, pas comme preuve (échantillon court, remplissage légèrement différent entre paires).
 
 ## Licence
 
