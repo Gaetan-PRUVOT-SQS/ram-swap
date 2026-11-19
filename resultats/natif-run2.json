@@ -1,0 +1,231 @@
+{
+ "etiquette": "natif-run2",
+ "horodatage": "2026-11-20T00:22:21",
+ "taille_hog_mio": 4096,
+ "passes_churn": 2,
+ "sysctl_debut": {
+  "swappiness": 60,
+  "vfs_cache_pressure": 100,
+  "page_cluster": 3
+ },
+ "sysctl_fin": {
+  "swappiness": 60,
+  "vfs_cache_pressure": 100,
+  "page_cluster": 3
+ },
+ "montee_s": 9.774481723998178,
+ "warmup_pswpout_mio": 8701.3671875,
+ "warmup_pswpin_mio": 8909.0234375,
+ "churn": [
+  {
+   "duree_s": 278.07532608399924,
+   "duree_lecture_s": 148.66147060799995,
+   "pswpin_mio": 8751.68359375,
+   "pswpout_mio": 8269.44921875,
+   "debit_mio_s": 61.21051102303972,
+   "psi_some_ms": 7599.098,
+   "psi_full_ms": 7280.511
+  },
+  {
+   "duree_s": 324.69803943100123,
+   "duree_lecture_s": 174.80794525999954,
+   "pswpin_mio": 8948.33203125,
+   "pswpout_mio": 8580.2265625,
+   "debit_mio_s": 53.98418365712012,
+   "psi_some_ms": 9025.423,
+   "psi_full_ms": 8575.662
+  }
+ ],
+ "refault_4k": {
+  "pages": 65536,
+  "resident_median_us": 1.1539996194187552,
+  "resident_p95_us": 1.538999640615657,
+  "swap_median_us": 2.9240000003483146,
+  "swap_p95_us": 5.000001692678779,
+  "latence_median_us": 1.7700003809295595,
+  "latence_p95_us": 3.4610020520631224
+ },
+ "echantillons": [
+  {
+   "t": 0.36,
+   "swappiness": 60,
+   "psi_some_avg10": 0.08,
+   "psi_full_avg10": 0.08
+  },
+  {
+   "t": 10.61,
+   "swappiness": 60,
+   "psi_some_avg10": 34.2,
+   "psi_full_avg10": 33.32
+  },
+  {
+   "t": 47.6,
+   "swappiness": 60,
+   "psi_some_avg10": 6.3,
+   "psi_full_avg10": 5.79
+  },
+  {
+   "t": 91.91,
+   "swappiness": 60,
+   "psi_some_avg10": 0.81,
+   "psi_full_avg10": 0.79
+  },
+  {
+   "t": 103.06,
+   "swappiness": 60,
+   "psi_some_avg10": 1.3,
+   "psi_full_avg10": 1.29
+  },
+  {
+   "t": 139.31,
+   "swappiness": 60,
+   "psi_some_avg10": 3.61,
+   "psi_full_avg10": 3.39
+  },
+  {
+   "t": 187.87,
+   "swappiness": 60,
+   "psi_some_avg10": 0.78,
+   "psi_full_avg10": 0.71
+  },
+  {
+   "t": 213.71,
+   "swappiness": 60,
+   "psi_some_avg10": 0.62,
+   "psi_full_avg10": 0.58
+  },
+  {
+   "t": 228.75,
+   "swappiness": 60,
+   "psi_some_avg10": 1.0,
+   "psi_full_avg10": 0.99
+  },
+  {
+   "t": 268.21,
+   "swappiness": 60,
+   "psi_some_avg10": 1.93,
+   "psi_full_avg10": 1.8
+  },
+  {
+   "t": 279.04,
+   "swappiness": 60,
+   "psi_some_avg10": 1.48,
+   "psi_full_avg10": 1.38
+  },
+  {
+   "t": 304.76,
+   "swappiness": 60,
+   "psi_some_avg10": 2.01,
+   "psi_full_avg10": 2.0
+  },
+  {
+   "t": 324.1,
+   "swappiness": 60,
+   "psi_some_avg10": 1.1,
+   "psi_full_avg10": 1.1
+  },
+  {
+   "t": 354.98,
+   "swappiness": 60,
+   "psi_some_avg10": 1.85,
+   "psi_full_avg10": 1.73
+  },
+  {
+   "t": 405.98,
+   "swappiness": 60,
+   "psi_some_avg10": 3.05,
+   "psi_full_avg10": 3.02
+  },
+  {
+   "t": 429.27,
+   "swappiness": 60,
+   "psi_some_avg10": 1.89,
+   "psi_full_avg10": 1.67
+  },
+  {
+   "t": 447.16,
+   "swappiness": 60,
+   "psi_some_avg10": 1.76,
+   "psi_full_avg10": 1.57
+  },
+  {
+   "t": 478.51,
+   "swappiness": 60,
+   "psi_some_avg10": 1.35,
+   "psi_full_avg10": 1.34
+  },
+  {
+   "t": 520.95,
+   "swappiness": 60,
+   "psi_some_avg10": 1.49,
+   "psi_full_avg10": 1.45
+  },
+  {
+   "t": 557.07,
+   "swappiness": 60,
+   "psi_some_avg10": 3.64,
+   "psi_full_avg10": 3.61
+  },
+  {
+   "t": 586.78,
+   "swappiness": 60,
+   "psi_some_avg10": 1.29,
+   "psi_full_avg10": 1.29
+  },
+  {
+   "t": 601.16,
+   "swappiness": 60,
+   "psi_some_avg10": 1.62,
+   "psi_full_avg10": 1.62
+  },
+  {
+   "t": 639.31,
+   "swappiness": 60,
+   "psi_some_avg10": 1.56,
+   "psi_full_avg10": 1.25
+  },
+  {
+   "t": 675.21,
+   "swappiness": 60,
+   "psi_some_avg10": 3.73,
+   "psi_full_avg10": 3.39
+  },
+  {
+   "t": 732.66,
+   "swappiness": 60,
+   "psi_some_avg10": 2.0,
+   "psi_full_avg10": 1.99
+  },
+  {
+   "t": 768.85,
+   "swappiness": 60,
+   "psi_some_avg10": 1.28,
+   "psi_full_avg10": 1.16
+  },
+  {
+   "t": 805.78,
+   "swappiness": 60,
+   "psi_some_avg10": 1.18,
+   "psi_full_avg10": 1.18
+  },
+  {
+   "t": 838.3,
+   "swappiness": 60,
+   "psi_some_avg10": 1.67,
+   "psi_full_avg10": 1.6
+  },
+  {
+   "t": 874.45,
+   "swappiness": 60,
+   "psi_some_avg10": 1.6,
+   "psi_full_avg10": 1.52
+  },
+  {
+   "t": 904.58,
+   "swappiness": 60,
+   "psi_some_avg10": 9.92,
+   "psi_full_avg10": 9.73
+  }
+ ],
+ "swap_used_mio": 1637
+}
