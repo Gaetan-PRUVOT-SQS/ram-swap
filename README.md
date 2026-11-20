@@ -1,5 +1,7 @@
 # ram-swap
 
+Français | [English](README.en.md)
+
 Régulateur des trois strates de mémoire pour le conteneur Crostini d'un Chromebook. Il lit la pression RAM toutes les 5 secondes et écrit trois réglages du noyau : `vm.swappiness`, `vm.vfs_cache_pressure` et `vm.page-cluster`.
 
 ## Genèse
