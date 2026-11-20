@@ -92,10 +92,10 @@ active swappiness=10 cache=50 cluster=4 dispo=2367 Mio swap=6/8191 Mio — strat
 ## Tests
 
 ```sh
-python3 -m unittest test_ram_swap test_bench_reel
+make test
 ```
 
-31 tests : pour l'outil, parse de `/proc`, les six niveaux, les deux plafonds, l'hystérésis des trois seuils de RAM, la relecture d'un ancien fichier d'état et l'aller-retour du format nouveau ; pour le harnais d'usage réel, les quantiles, la survie de l'ouvrier sur des tranches de mémoire partielles et les mesures ponctuelles. Suite verte en ~0,5 s.
+Équivalent à `python3 -m unittest test_ram_swap test_bench_reel`. 31 tests : pour l'outil, parse de `/proc`, les six niveaux, les deux plafonds, l'hystérésis des trois seuils de RAM, la relecture d'un ancien fichier d'état et l'aller-retour du format nouveau ; pour le harnais d'usage réel, les quantiles, la survie de l'ouvrier sur des tranches de mémoire partielles et les mesures ponctuelles. Suite verte en ~0,5 s.
 
 ## Outils de mesure
 
