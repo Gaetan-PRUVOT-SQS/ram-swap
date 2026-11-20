@@ -1,55 +1,57 @@
 # ram-swap
 
-Français | [English](README.en.md)
+English | [Français](README.fr.md)
 
-Régulateur des trois strates de mémoire pour le conteneur Crostini d'un Chromebook. Il lit la pression RAM toutes les 5 secondes et écrit trois réglages du noyau : `vm.swappiness`, `vm.vfs_cache_pressure` et `vm.page-cluster`.
+A three-tier memory regulator for the Crostini container of a Chromebook. It reads RAM pressure every 5 seconds and writes three kernel knobs: `vm.swappiness`, `vm.vfs_cache_pressure` and `vm.page-cluster`.
 
-## Genèse
+## Background
 
-La machine de départ est un Chromebook ASUS CM1405 (MediaTek Kompanio 540, 8 Go de RAM, 128 Go d'eMMC), choisi pour de l'ultra-mobilité. Le conteneur Crostini (Debian 13, arm64) y expose environ 6,5 Gio de RAM et un fichier de swap de 8 Gio posé sur l'eMMC. Le noyau de ce conteneur n'a ni zram ni zswap.
+The machine this started on is an ASUS CM1405 Chromebook (MediaTek Kompanio 540, 8 GB RAM, 128 GB eMMC), picked for ultra-portability. Its Crostini container (Debian 13, arm64) exposes about 6.5 GiB of RAM and an 8 GiB swap file sitting on the eMMC. That container's kernel has no zram and no zswap.
 
-Les réglages livrés par Debian (`swappiness = 60`, `vfs_cache_pressure = 100`, `page-cluster = 3`) sont un compromis généraliste : ils évincent des pages anonymes même quand la machine va bien, et leur readahead de 32 Kio ne profite pas d'un disque de swap plus large. Ce projet est l'optimisation maison qui remplace ces valeurs par une politique adaptée au profil de la machine : peu de pages anonymes, beaucoup de cache fichier, un disque de swap qui accepte des lectures de 64 Kio.
+The settings Debian ships (`swappiness = 60`, `vfs_cache_pressure = 100`, `page-cluster = 3`) are a general-purpose compromise: they evict anonymous pages even when the machine is fine, and their 32 KiB readahead does nothing for a wider swap disk. This project is the home-made optimization that replaces those values with a policy tuned to the machine's profile: few anonymous pages, a large file cache, and a swap disk that takes 64 KiB reads.
 
-## Le principe
+## The idea
 
-Trois strates, sur le modèle Strata :
+Three tiers, modeled on Strata:
 
-1. **La RAM** garde le jeu de travail, les pages touchées récemment.
-2. **zram**, s'il existe, est la strate tiède : les pages froides y sont compressées. Ce noyau ne l'a pas, la strate reste inactive.
-3. **Le fichier de swap** est l'archive disque : il ne reçoit des pages que quand la RAM se serre.
+1. **RAM** keeps the working set, the pages touched recently.
+2. **zram**, when it exists, is the warm tier: cold pages get compressed there. This kernel has none, so the tier stays idle.
+3. **The swap file** is the disk archive: it only receives pages when RAM gets tight.
 
-Les noms de strates décrivent la pression choisie, pas le fichier de destination : le noyau écrit toujours dans le périphérique de swap de plus haute priorité.
+Tier names describe the chosen pressure, not the destination file: the kernel always writes to the highest-priority swap device.
 
-### Les six strates
+### The six tiers
 
-| Ordre | Condition d'entrée | Niveau | swappiness | cache | Raison |
+The level names are the daemon's own labels, in French, as are the reasons it logs.
+
+| Order | Entry condition | Level | swappiness | cache | Reason |
 |---|---|---|---|---|---|
-| 1 | Aucun swap | `sans-swap` | 10 | 100 | le réglage ne change rien |
-| 2 | RAM disponible sous 8 %, ou PSI `full` `avg10` ≥ 5 | `urgent` | 40 | 150 | seules les pages les plus froides partent |
-| 3 | Débit de swap ≥ 40 Mo/s et PSI `full` `avg10` ≥ 1, hors urgence | `sature` | 15 | 100 | le disque est déjà chargé et des tâches sont bloquées |
-| 4 | RAM disponible sous 20 %, ou PSI `some` `avg10` ≥ 8, ou PSI `full` `avg10` ≥ 1 | `cooled` si zram a ≥ 128 Mio libres, sinon `archive` | 35 ou 25 | 80 ou 100 | pages froides vers zram, ou vers le swap disque |
-| 5 | zram prêt et RAM disponible sous 40 % | `cooled` | 30 | 80 | zram absorbe les pages peu utilisées |
-| 6 | Sinon | `active` | 10 | 50 | la RAM conserve le jeu de travail |
+| 1 | No swap at all | `sans-swap` | 10 | 100 | tweaking does nothing |
+| 2 | Available RAM under 8 %, or PSI `full` `avg10` ≥ 5 | `urgent` | 40 | 150 | only the coldest pages leave |
+| 3 | Swap throughput ≥ 40 MB/s and PSI `full` `avg10` ≥ 1, outside emergency | `sature` | 15 | 100 | the disk is already loaded and tasks are stalled |
+| 4 | Available RAM under 20 %, or PSI `some` `avg10` ≥ 8, or PSI `full` `avg10` ≥ 1 | `cooled` if zram has ≥ 128 MiB free, else `archive` | 35 or 25 | 80 or 100 | cold pages to zram, or to disk swap |
+| 5 | zram ready and available RAM under 40 % | `cooled` | 30 | 80 | zram absorbs lightly used pages |
+| 6 | Otherwise | `active` | 10 | 50 | RAM keeps the working set |
 
-La première condition vraie gagne. Les comparaisons sont strictes : la valeur pile sur un seuil reste du côté le plus calme.
+First true condition wins. Comparisons are strict: a value exactly on a threshold stays on the calm side.
 
-### Hystérésis
+### Hysteresis
 
-Une strate déjà affichée attend 5 points de RAM disponible de plus avant de rendre la main, pour ne pas osciller à chaque lecture :
+A tier already in effect waits for 5 extra points of available RAM before giving ground, so nothing oscillates at every reading:
 
-| Strate tenue | Seuil d'entrée | Seuil de sortie |
+| Held tier | Entry threshold | Exit threshold |
 |---|---|---|
-| `urgent` | disponible < 8 % | disponible < 13 % |
-| `archive`, ou `cooled` à swappiness 35 | disponible < 20 % | disponible < 25 % |
-| `cooled` à swappiness 30 | disponible < 40 % | disponible < 45 % |
+| `urgent` | available < 8 % | available < 13 % |
+| `archive`, or `cooled` at swappiness 35 | available < 20 % | available < 25 % |
+| `cooled` at swappiness 30 | available < 40 % | available < 45 % |
 
-### Plafonds
+### Caps
 
-Après le choix de la strate, deux plafonds ramènent `swappiness` à 10 : swap libre < 256 Mio (y compris en urgence), ou pages anonymes < 256 Mio hors urgence. Si un plafond baisse vraiment la valeur, le niveau annoncé devient `active` et le journal affiche le swappiness réellement écrit ; `vfs_cache_pressure` et `page-cluster` restent ceux de la strate choisie.
+After the tier is picked, two caps bring `swappiness` back to 10: free swap < 256 MiB (including during emergencies), or anonymous pages < 256 MiB outside emergencies. If a cap actually lowers the value, the announced level becomes `active` and the log shows the swappiness actually written; `vfs_cache_pressure` and `page-cluster` keep the chosen tier's values.
 
-`page-cluster` vaut 4 dès qu'il reste du swap disque (lectures d'avance de 64 Kio), 0 si zram est le seul swap.
+`page-cluster` is 4 whenever disk swap exists (64 KiB read-ahead), 0 if zram is the only swap.
 
-## Installation
+## Install
 
 ```sh
 install -m 755 ram_swap.py /home/<user>/ram-swap/ram_swap.py
@@ -58,7 +60,7 @@ cp ram-swap-policy.service /etc/systemd/system/
 systemctl enable --now ram-swap-policy
 ```
 
-Fichier de démarrage `/etc/sysctl.d/99-swap-page-cluster.conf`, appliqué avant que le service reprenne la main :
+Boot file `/etc/sysctl.d/99-swap-page-cluster.conf`, applied before the service takes over:
 
 ```ini
 vm.swappiness = 10
@@ -66,32 +68,32 @@ vm.vfs_cache_pressure = 50
 vm.page-cluster = 4
 ```
 
-L'unité lance `ram-swap-policy --watch --interval 5`, redémarre sur échec (`Restart=on-failure`, `RestartSec=2`) et démarre après `swap.target`. L'état courant est dans `/run/ram-swap-policy.json`.
+The unit runs `ram-swap-policy --watch --interval 5`, restarts on failure (`Restart=on-failure`, `RestartSec=2`) and starts after `swap.target`. Current state lives in `/run/ram-swap-policy.json`.
 
-## Utilisation
+## Usage
 
 ```text
 ram-swap-policy [--dry-run] [--json] [--watch] [--interval 5] [--proc /proc] [--state /run/ram-swap-policy.json]
 ```
 
-| Option | Effet |
+| Option | Effect |
 |---|---|
-| `--dry-run` | Affiche la décision et n'écrit ni les sysctl ni l'état |
-| `--json` | Affiche `level`, `swappiness`, `vfs_cache_pressure`, `page_cluster`, `reason` |
-| `--watch` | Boucle jusqu'au signal. Incompatible avec `--dry-run` |
-| `--interval` | Secondes entre deux lectures. Doit être positif. Défaut : 5 |
-| `--proc` | Racine à lire à la place de `/proc` |
-| `--state` | Fichier d'état à la place de `/run/ram-swap-policy.json` |
+| `--dry-run` | Prints the decision, writes neither the sysctls nor the state |
+| `--json` | Prints `level`, `swappiness`, `vfs_cache_pressure`, `page_cluster`, `reason` |
+| `--watch` | Loops until signaled. Incompatible with `--dry-run` |
+| `--interval` | Seconds between two readings. Must be positive. Default: 5 |
+| `--proc` | Root to read instead of `/proc` |
+| `--state` | State file instead of `/run/ram-swap-policy.json` |
 
-Une ligne de journal ne sort que quand le niveau, le swappiness, la pression de cache ou `page-cluster` change :
+A log line only comes out when the level, the swappiness, the cache pressure or `page-cluster` changes:
 
 ```text
 active swappiness=10 cache=50 cluster=4 dispo=2367 Mio swap=6/8191 Mio
 ```
 
-La ligne se termine par la raison du niveau.
+The line ends with the tier's reason, in French.
 
-`SIGTERM` et `SIGINT` terminent la boucle proprement, après le sommeil de l'intervalle.
+`SIGTERM` and `SIGINT` end the loop cleanly, after the interval sleep.
 
 ## Tests
 
@@ -99,171 +101,171 @@ La ligne se termine par la raison du niveau.
 make test
 ```
 
-Équivalent à `python3 -m unittest test_ram_swap test_bench_reel`. 31 tests : pour l'outil, parse de `/proc`, les six niveaux, les deux plafonds, l'hystérésis des trois seuils de RAM, la relecture d'un ancien fichier d'état et l'aller-retour du format nouveau ; pour le harnais d'usage réel, les quantiles, la survie de l'ouvrier sur des tranches de mémoire partielles et les mesures ponctuelles. Suite verte en ~0,5 s.
+Same as `python3 -m unittest test_ram_swap test_bench_reel`. 31 tests: for the tool, `/proc` parsing, the six tiers, both caps, hysteresis on the three RAM thresholds, re-reading an old state file and the round-trip of the new format; for the real-usage harness, quantiles, worker survival on partial memory spans, and the point measurements. Green suite in ~0.5 s.
 
-## Outils de mesure
+## Measurement tools
 
-Trois harnais livrés avec le projet :
+The harnesses shipped with the project:
 
-- `bench_ram_swap.py` mesure une version du module : coût d'une itération lecture+décision, détail des parses, latence d'une invocation complète. Accepte un chemin de module pour comparer deux versions : `python3 bench_ram_swap.py /chemin/vers/autre_ram_swap.py`
-- `bench_systeme.py` mesure une configuration sous thrash : hog de 4 Gio churné, latence de refault 4 KiB aléatoire sur une région poussée en swap par `MADV_PAGEOUT` (étalonnée contre la même tournée en RAM), échantillonnage du swappiness effectif et de la PSI à 0,5 s
-- `bench_reel.py` mesure l'usage réel : des applications d'arrière-plan (zone chaude réécrite souvent, zone froide abandonnée) occupent la RAM pendant que le harnais relève les latences perçues, lancement d'un outil, sauvegarde d'un petit fichier (fsync) et débit de lecture disque
-- `bench_sature.py` sature délibérément : outils de design web réels (Photopea, Excalidraw) et onglets chargés dans Chrome headless, modèles de documents en RAM touchés en continu, pendant que trois builds gcc doivent aboutir
-- `bench_recap.py` synthétise les runs de `resultats/`
+- `bench_ram_swap.py` measures one version of the module: cost of a read+decision iteration, parse breakdown, latency of a full invocation. Takes a module path to compare two versions: `python3 bench_ram_swap.py /path/to/other_ram_swap.py`
+- `bench_systeme.py` measures one configuration under thrash: a churned 4 GiB anonymous hog, random 4 KiB refault latency on a region pushed to swap with `MADV_PAGEOUT` (calibrated against the same pass in RAM), sampling of effective swappiness and PSI at 0.5 s
+- `bench_reel.py` measures real usage: background apps (a hot zone rewritten often, a cold zone left alone) fill RAM while the harness records perceived latencies: tool startup, small file save (fsync), disk read throughput
+- `bench_sature.py` saturates on purpose: real web design tools (Photopea, Excalidraw) and loaded tabs in headless Chrome, in-RAM document models touched continuously, while three gcc builds have to pass
+- `bench_recap.py` summarizes the runs in `resultats/`
 
-## Benchmark
+## Benchmarks
 
-### Machine de référence
+### Reference machine
 
-- Hôte : Chromebook ASUS CM1405, MediaTek Kompanio 540, 8 Go de RAM, 128 Go d'eMMC
-- Conteneur : Debian 13 arm64 dans Crostini, noyau 6.6, ~6,5 Gio de RAM exposées
-- Swap : `/swapfile` de 8 Gio, priorité −2, sur `vdb` (image disque du conteneur, donc l'eMMC), partagé avec la racine
-- MGLRU `lru_gen` à `0x0033`, pas de zram ni zswap
-- Comparaison : solution (démon actif, réglages adaptatifs) contre natif Debian (démon arrêté, `60/100/3`)
+- Host: ASUS CM1405 Chromebook, MediaTek Kompanio 540, 8 GB RAM, 128 GB eMMC
+- Container: Debian 13 arm64 in Crostini, kernel 6.6, ~6.5 GiB RAM exposed
+- Swap: 8 GiB `/swapfile`, priority −2, on `vdb` (the container's disk image, hence the eMMC), shared with the root filesystem
+- MGLRU `lru_gen` at `0x0033`, no zram or zswap
+- Comparison: the solution (daemon active, adaptive settings) against stock Debian (daemon stopped, `60/100/3`)
 
-### Micro-benchmark de l'outil
+### Tool micro-benchmark
 
-Sur la machine de référence, 300 itérations, 15 invocations :
+On the reference machine, 300 iterations, 15 invocations:
 
-| Mesure | Valeur |
+| Measure | Value |
 |---|---|
-| Itération lecture `/proc` + décision (médiane) | ~500 µs, p95 719 µs |
-| dont parse `meminfo` | 32 µs |
-| dont parse `pressure` | 4 µs |
-| dont parse `vmstat` | 66 µs |
-| Invocation `--dry-run --json` complète (médiane) | 137 ms, p95 147 ms |
-| Démarrage Python nu (référence) | 43 ms |
-| Service en production | 7,6 Mio RSS, ~0,11 % de CPU sur 2 h 20 |
+| `/proc` read + decision iteration (median) | ~500 µs, p95 719 µs |
+| of which `meminfo` parse | 32 µs |
+| of which `pressure` parse | 4 µs |
+| of which `vmstat` parse | 66 µs |
+| Full `--dry-run --json` invocation (median) | 137 ms, p95 147 ms |
+| Bare Python startup (reference) | 43 ms |
+| Service in production | 7.6 MiB RSS, ~0.11 % CPU over 2 h 20 |
 
-Le coût utile d'un cycle est un demi-millième de l'intervalle de 5 s ; les 137 ms d'une invocation one-shot sont presque tout de l'import Python, sans impact en mode service.
+The useful cost of a cycle is one two-thousandth of the 5 s interval; the 137 ms of a one-shot invocation is almost entirely Python imports, no impact in service mode.
 
-### Benchmark système : protocole
+### System benchmark: protocol
 
-Par run, à configuration égale : purge des caches, hog anonyme de 4 Gio touché puis churné (2 passes : écriture complète puis lecture complète ; l'éviction vers le swap est le fait du noyau), puis région de 256 Mio explicitement poussée en swap par `MADV_PAGEOUT` et relue en ordre aléatoire page par page, avec étalonnage contre la même tournée en RAM. Compteurs `pswpin`/`pswpout` et totaux PSI mesurés en deltas autour de chaque passe. Deux runs par configuration, entrelacés : solution → natif → solution → natif.
+Each run, same conditions: cache purge, a 4 GiB anonymous hog touched then churned (2 passes: full write then full read; eviction to swap is the kernel's doing), then a 256 MiB region explicitly pushed to swap with `MADV_PAGEOUT` and re-read in page-by-page random order, calibrated against the same pass in RAM. `pswpin`/`pswpout` counters and PSI totals measured as deltas around each pass. Two runs per configuration, interleaved: solution → native → solution → native.
 
-### Résultats par run
+### Per-run results
 
-**solution-run1** (sysctl début `10/50/4`, fin `40/150/4`, strate `urgent`) :
+**solution-run1** (sysctl start `10/50/4`, end `40/150/4`, tier `urgent`):
 
-| Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
+| Pass | Duration | Throughput | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
-| 1 | 221,1 s | 77 Mio/s | 8585 Mio | 8356 Mio | 6,6 s | 6,1 s |
-| 2 | 240,5 s | 73 Mio/s | 8851 Mio | 8623 Mio | 6,8 s | 6,5 s |
+| 1 | 221.1 s | 77 MiB/s | 8585 MiB | 8356 MiB | 6.6 s | 6.1 s |
+| 2 | 240.5 s | 73 MiB/s | 8851 MiB | 8623 MiB | 6.8 s | 6.5 s |
 
-Refault 4 KiB : 1,8 µs médiane, p95 3,2 µs. Montée en charge : 13,0 s.
+4 KiB refault: 1.8 µs median, p95 3.2 µs. Ramp-up: 13.0 s.
 
-**natif-run1** (sysctl constants `60/100/3`) :
+**natif-run1** (constant sysctl `60/100/3`):
 
-| Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
+| Pass | Duration | Throughput | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
-| 1 | 256,2 s | 66 Mio/s | 8587 Mio | 8412 Mio | 5,5 s | 5,2 s |
-| 2 | 256,2 s | 65 Mio/s | 8459 Mio | 8281 Mio | 6,9 s | 6,6 s |
+| 1 | 256.2 s | 66 MiB/s | 8587 MiB | 8412 MiB | 5.5 s | 5.2 s |
+| 2 | 256.2 s | 65 MiB/s | 8459 MiB | 8281 MiB | 6.9 s | 6.6 s |
 
-Refault 4 KiB : 1,7 µs médiane, p95 3,1 µs. Montée en charge : 12,1 s.
+4 KiB refault: 1.7 µs median, p95 3.1 µs. Ramp-up: 12.1 s.
 
-**solution-run2** (sysctl début `10/50/4`, fin `15/100/4`, strate `sature`) :
+**solution-run2** (sysctl start `10/50/4`, end `15/100/4`, tier `sature`):
 
-| Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
+| Pass | Duration | Throughput | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
-| 1 | 211,0 s | 80 Mio/s | 8598 Mio | 8291 Mio | 5,4 s | 5,1 s |
-| 2 | 248,9 s | 68 Mio/s | 8719 Mio | 8312 Mio | 9,9 s | 9,5 s |
+| 1 | 211.0 s | 80 MiB/s | 8598 MiB | 8291 MiB | 5.4 s | 5.1 s |
+| 2 | 248.9 s | 68 MiB/s | 8719 MiB | 8312 MiB | 9.9 s | 9.5 s |
 
-Refault 4 KiB : 1,8 µs médiane, p95 2,8 µs. Montée en charge : 12,3 s.
+4 KiB refault: 1.8 µs median, p95 2.8 µs. Ramp-up: 12.3 s.
 
-**natif-run2** (sysctl constants `60/100/3`) :
+**natif-run2** (constant sysctl `60/100/3`):
 
-| Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
+| Pass | Duration | Throughput | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
-| 1 | 278,1 s | 61 Mio/s | 8752 Mio | 8269 Mio | 7,6 s | 7,3 s |
-| 2 | 324,7 s | 54 Mio/s | 8948 Mio | 8580 Mio | 9,0 s | 8,6 s |
+| 1 | 278.1 s | 61 MiB/s | 8752 MiB | 8269 MiB | 7.6 s | 7.3 s |
+| 2 | 324.7 s | 54 MiB/s | 8948 MiB | 8580 MiB | 9.0 s | 8.6 s |
 
-Refault 4 KiB : 1,8 µs médiane, p95 3,5 µs. Montée en charge : 9,8 s.
+4 KiB refault: 1.8 µs median, p95 3.5 µs. Ramp-up: 9.8 s.
 
-### Synthèse agrégée
+### Aggregate summary
 
-Médianes des passes, 2 runs par configuration :
+Pass medians, 2 runs per configuration:
 
-| Métrique | Solution | Natif Debian | Écart |
+| Metric | Solution | Stock Debian | Gap |
 |---|---|---|---|
-| Passe de churn 4 Gio | **230,4 s** | 278,8 s | solution **+21 % plus rapide** |
-| Débit effectif | **74,4 Mio/s** | 61,7 Mio/s | solution **+20 %** |
-| PSI `full` par passe | 6,8 s | 6,9 s | égalité |
-| PSI `some` par passe | 7,2 s | 7,3 s | égalité |
-| Refault 4 KiB médiane | 1,81 µs | 1,73 µs | égalité (±10 % = bruit) |
-| Montée en charge | 12,6 s | 10,9 s | natif légèrement devant |
+| 4 GiB churn pass | **230.4 s** | 278.8 s | solution **21 % faster** |
+| Effective throughput | **74.4 MiB/s** | 61.7 MiB/s | solution **+20 %** |
+| PSI `full` per pass | 6.8 s | 6.9 s | even |
+| PSI `some` per pass | 7.2 s | 7.3 s | even |
+| 4 KiB refault median | 1.81 µs | 1.73 µs | even (±10 % = noise) |
+| Ramp-up | 12.6 s | 10.9 s | native slightly ahead |
 
-### Lecture des résultats
+### Reading the results
 
-1. **Le gain net de la solution est le débit soutenu.** Les deux configurations déplacent les mêmes volumes (~8,5 Gio in/out par passe) mais la solution les déplace 17 à 21 % plus vite. Le facteur identifié est `page-cluster` : 64 Kio de readahead contre 32 Kio au natif. Une mesure antérieure sur le même matériel donnait ~220 Mo/s de swap-in séquentiel à cluster 4 contre ~137 Mo/s à cluster 3, même direction.
-2. **Le natif se dégrade, la solution tient.** Les passes natives ralentissent de run en run (256 → 278 → 325 s) tandis que la solution reste dans un bandeau serré (211-249 s). La stratégie adaptative a varié selon le profil de la tempête : strate `urgent` (40/150) au premier run, strate `sature` (15/100) au second, quand le swap déplace déjà trop et que des tâches sont bloquées.
-3. **L'interactivité (PSI) est une égalité** sous ce thrash extrême, et le refault aléatoire aussi : pas de gain inventé là où il n'y en a pas. La valeur calme du démon (swappiness 10 contre 60 au quotidien) n'est pas exercée par ce test ; elle repose sur le profil de la machine (~133 Mio de pages anonymes, plafond qui maintient 10 hors urgence).
+1. **The solution's net gain is sustained throughput.** Both configurations move the same volumes (~8.5 GiB in/out per pass) but the solution moves them 17 to 21 % faster. The identified factor is `page-cluster`: 64 KiB read-ahead against 32 KiB stock. An earlier measurement on the same hardware gave ~220 MB/s sequential swap-in at cluster 4 against ~137 MB/s at cluster 3, same direction.
+2. **Stock degrades, the solution holds.** Native passes slow down run after run (256 → 278 → 325 s) while the solution stays in a narrow band (211-249 s). The adaptive strategy varied with the storm's profile: tier `urgent` (40/150) on the first run, tier `sature` (15/100) on the second, when swap is already moving too much and tasks are stalled.
+3. **Interactivity (PSI) is even** under this extreme thrash, and so is random refault: no invented gains where there are none. The daemon's calm value (swappiness 10 instead of 60 day to day) is not exercised by this test; it rests on the machine's profile (~133 MiB of anonymous pages, a cap that holds 10 outside emergencies).
 
-### Réserves
+### Caveats
 
-2 runs × 2 passes par configuration : motif constant sur les quatre appariements, mais échantillon court. Le disque de swap est partagé avec la racine du conteneur, donc du bruit d'hôte est possible. Le test force un thrash que l'usage réel de cette machine dépasse rarement.
+2 runs × 2 passes per configuration: the pattern holds across all four pairings, but the sample is short. The swap disk is shared with the container's root, so host noise is possible. The test forces a thrash this machine rarely reaches in real use.
 
-### Usage réel : poste contraint, latences perçues
+### Real usage: constrained desktop, perceived latencies
 
-Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe la RAM comme des applications ouvertes, chacune avec une zone chaude réécrite toutes les 150 ms et une zone froide abandonnée, et mesure 50 fois, toutes les 2 s, ce qu'un utilisateur ressent : lancement d'un interpréteur Python, sauvegarde d'un fichier de 64 Kio avec `fsync` sur l'eMMC, débit de lecture disque. Le harnais abandonne la mesure si un ouvrier meurt : la charge doit être tenue du début à la fin. Deux scénarios, deux paires entrelacées solution/natif, 50 échantillons par run.
+The forced thrash above says nothing about daily life. This second protocol fills RAM like open apps, each with a hot zone rewritten every 150 ms and a cold zone left alone, and takes 50 measurements, every 2 s, of what a user feels: starting a Python interpreter, saving a 64 KiB file with `fsync` on the eMMC, disk read throughput. The harness aborts if a worker dies: the load has to hold from start to finish. Two scenarios, two interleaved solution/native pairs, 50 samples per run.
 
-**Scénario modéré** : 2 applications × 600 Mio, RAM disponible médiane 9-10 %. Attention : ce couple de runs est biaisé par l'ordre (pas de remise à zéro du swap entre eux ; le natif héritait de la marge libérée par le swap-out de la solution qui tournait juste avant). Les chiffres restent publiés pour ce qu'ils sont :
+**Moderate scenario**: 2 apps × 600 MiB, median available RAM 9-10 %. Note: this pair is order-biased (no swap reset between them; native inherited the margin freed by the solution's swap-out, which ran just before). The numbers are published for what they are:
 
-| Métrique (médiane) | Solution (`urgent` 40/150) | Natif (60/100/3) |
+| Metric (median) | Solution (`urgent` 40/150) | Native (60/100/3) |
 |---|---|---|
-| Lancement outil | 52,1 ms | 51,0 ms |
-| Sauvegarde fsync | 16,4 ms (p95 170, max 304) | 12,7 ms (p95 19,8, max 38) |
-| Lecture disque | 584 Mio/s | 725 Mio/s |
-| Swap in / out | 42 / **387 Mio** | 18 / 0 Mio |
-| PSI some / full | 1,8 / 1,4 s | 0,1 / 0,1 s |
+| Tool startup | 52.1 ms | 51.0 ms |
+| fsync save | 16.4 ms (p95 170, max 304) | 12.7 ms (p95 19.8, max 38) |
+| Disk read | 584 MiB/s | 725 MiB/s |
+| Swap in / out | 42 / **387 MiB** | 18 / 0 MiB |
+| PSI some / full | 1.8 / 1.4 s | 0.1 / 0.1 s |
 
-**Scénario chargé** : 3 applications × 500 Mio, RAM disponible médiane 2,5-4 %, swap remis à zéro avant chaque run (paire propre) :
+**Loaded scenario**: 3 apps × 500 MiB, median available RAM 2.5-4 %, swap reset before each run (clean pair):
 
-| Métrique (médiane) | Solution (`urgent` 40/150) | Natif (60/100/3) |
+| Metric (median) | Solution (`urgent` 40/150) | Native (60/100/3) |
 |---|---|---|
-| Lancement outil | 50,2 ms | 49,7 ms |
-| Sauvegarde fsync | **12,8 ms** (p95 24,5) | 15,6 ms (p95 27,5, max 137) |
-| Lecture disque | **777 Mio/s** | 667 Mio/s |
-| Swap in / out | 0 / **176 Mio** | 0 / 241 Mio |
-| PSI some / full | 0,1 / 0,1 s | 0,1 / 0,1 s |
+| Tool startup | 50.2 ms | 49.7 ms |
+| fsync save | **12.8 ms** (p95 24.5) | 15.6 ms (p95 27.5, max 137) |
+| Disk read | **777 MiB/s** | 667 MiB/s |
+| Swap in / out | 0 / **176 MiB** | 0 / 241 MiB |
+| PSI some / full | 0.1 / 0.1 s | 0.1 / 0.1 s |
 
-**Lecture.**
+**Reading.**
 
-1. La paire propre (scénario chargé) donne la solution meilleure ou égale sur tout ce qui se perçoit : sauvegardes 18 % plus rapides, lectures +16 %, 27 % de pages en moins déplacées vers le swap, mêmes quasi-absence de gels. Le lancement d'outil est une égalité (1 %).
-2. La paire modérée, biaisée par l'ordre, dit malgré tout une chose vraie : le mode `urgent` du démon (swappiness 40, cache 150) peut payer des pics de fsync (p95 170 ms) quand l'éviction agressive et l'I/O eMMC se superposent. C'est le coût réel de sa réactivité, publié tel quel.
-3. Dans les deux runs de la solution, le démon a détecté la pression réelle et monté en `urgent` (10→40, cache 150), puis y est resté par hystérésis. Au natif, rien ne réagit : les valeurs restent 60/100/3 du début à la fin.
-4. Correction de méthode publiée pour rester honnête : la première version de ce protocole mesurait une machine quasi au repos. Les ouvriers mouraient ~150 ms après le départ (bug de tranche `mmap` sur une zone partielle), la charge n'était jamais tenue, et les chiffres « aucune config n'échange » décrivaient du vide. Le harnais est corrigé (écriture à longueur exacte, arrêt partagé entre processus, garde de survie) et couvert par 9 tests dédiés.
+1. The clean pair (loaded scenario) has the solution better or equal on everything perceptible: saves 18 % faster, reads +16 %, 27 % fewer pages moved to swap, same near-absence of stalls. Tool startup is even (1 %).
+2. The moderate pair, order-biased, still says one true thing: the daemon's `urgent` mode (swappiness 40, cache 150) can pay fsync spikes (p95 170 ms) when aggressive eviction and eMMC I/O overlap. That is the real cost of its responsiveness, published as is.
+3. In both solution runs, the daemon detected real pressure and climbed to `urgent` (10→40, cache 150), then held by hysteresis. On native, nothing reacts: values stay 60/100/3 from start to finish.
+4. Method correction, published for honesty's sake: the first version of this protocol measured a near-idle machine. Workers died ~150 ms in (an `mmap` partial-span bug), the load never held, and the "neither config swaps" numbers described nothing. The harness is fixed (exact-length writes, cross-process stop, survival guard) and covered by 9 dedicated tests.
 
-### Saturation créative : design web + onglets + build de dev
+### Creative saturation: web design + tabs + a dev build
 
-La question posée : la machine et le swap tiennent-ils un poste créatif exigeant ? Scénario : 6 onglets Chrome headless (Photopea, deux Excalidraw, trois articles Wikipédia chargés), trois « modèles de documents » de 600 Mio touchés en continu (les calques d'un fichier de design), et pendant ce temps trois builds gcc de 80 fichiers qui doivent réussir. Remise à zéro du swap avant chaque run, 8 Go de RAM sur 8 Gio de swap.
+The question: can the machine and the swap hold a demanding creative workload? Scenario: 6 headless Chrome tabs (Photopea, two Excalidraw, three loaded Wikipedia articles), three 600 MiB "document models" touched continuously (a design file's layers), and meanwhile three gcc builds of 80 files that have to pass. Swap reset before each run, 8 GB RAM against 8 GiB of swap.
 
-| Métrique | Solution (`urgent` 40 → `archive` 25) | Natif (60/100/3) |
+| Metric | Solution (`urgent` 40 → `archive` 25) | Native (60/100/3) |
 |---|---|---|
-| Builds réussis | 3/3 | 3/3 |
-| Durées de build | 19,6 / 10,6 / **8,3 s** | 20,1 / 9,9 / 10,9 s |
-| Sauvegarde fsync (médiane / p95) | **62,1 ms / 205 ms** | 68,4 ms / 319 ms |
-| Lancement outil | 85,5 ms | 85,6 ms |
-| Lecture disque | 402 Mio/s | 437 Mio/s |
-| Swap in / out | 179 / 2 850 Mio | 93 / 2 811 Mio |
-| PSI some / full | 10,4 / 4,4 s | 7,5 / 4,1 s |
+| Builds passing | 3/3 | 3/3 |
+| Build durations | 19.6 / 10.6 / **8.3 s** | 20.1 / 9.9 / 10.9 s |
+| fsync save (median / p95) | **62.1 ms / 205 ms** | 68.4 ms / 319 ms |
+| Tool startup | 85.5 ms | 85.6 ms |
+| Disk read | 402 MiB/s | 437 MiB/s |
+| Swap in / out | 179 / 2,850 MiB | 93 / 2,811 MiB |
+| PSI some / full | 10.4 / 4.4 s | 7.5 / 4.1 s |
 | OOM | 0 | 0 |
-| RAM disponible minimale | 9,4 % | 9,4 % |
+| Minimum available RAM | 9.4 % | 9.4 % |
 
-Les deux configurations tiennent le scénario : aucun OOM, tous les builds réussissent, tous les process survivent. La solution garde deux petits avantages dans la profondeur de la saturation : le troisième build (8,3 s contre 10,9 s) et la queue des sauvegardes (p95 +36 % mieux), cohérents avec le readahead 64 Kio mesuré plus haut ; le natif garde des micro-gels cumulés un peu plus faibles. Le démon a suivi la courbe de pression (montée `urgent` 40 au pic, retour `archive` 25 ensuite) quand le natif restait figé à 60.
+Both configurations hold the scenario: no OOM, every build passes, every process survives. The solution keeps two small advantages deep in the saturation: the third build (8.3 s against 10.9 s) and the save tail (p95 36 % better), consistent with the 64 KiB read-ahead measured above; native keeps slightly lower accumulated micro-stalls. The daemon followed the pressure curve (`urgent` 40 at the peak, back to `archive` 25 after) while native stayed frozen at 60.
 
-Un couple de runs seulement : lecture indicative, pas statistique.
+One pair of runs only: indicative reading, not statistics.
 
-### Bilan des trois régimes
+### Where the three regimes land
 
-| Régime | Verdict |
+| Regime | Verdict |
 |---|---|
-| Quotidien calme à modéré (usage réel, dispo > 9 %) | Égalité : aucune config n'échange beaucoup, latences perçues indiscernables. La solution ne dégrade rien et reste à swappiness 10 tant que la machine respire. |
-| Pénurie (churn forcé, thrash) | **Solution +20 % de débit soutenu** (74,4 contre 61,7 Mio/s) grâce au readahead 64 Kio ; le natif se dégrade de passe en passe, la solution tient son bandeau. |
-| Saturation créative (design web + onglets + builds) | **Les deux tiennent** : zéro OOM, tous les builds réussissent, ~2,8 Gio poussés dans le swap. Petits avantages solution dans la profondeur (build 8,3 s contre 10,9 s, fsync p95 +36 % mieux), deux petits avantages natifs (PSI some, lecture). |
-| Coût connu de la solution | Le mode `urgent` (swappiness 40, cache 150) peut payer des pics de fsync sous I/O eMMC simultanée. Publié tel quel. |
+| Calm to moderate daily use (real usage, available > 9 %) | Even: neither config swaps much, perceived latencies indistinguishable. The solution degrades nothing and stays at swappiness 10 while the machine breathes. |
+| Shortage (forced churn, thrash) | **Solution +20 % sustained throughput** (74.4 against 61.7 MiB/s) thanks to 64 KiB read-ahead; native degrades pass after pass, the solution holds its band. |
+| Creative saturation (web design + tabs + builds) | **Both hold**: zero OOM, all builds pass, ~2.8 GiB pushed into swap. Small solution edges deep in (build 8.3 s against 10.9 s, fsync p95 36 % better), two small native edges (PSI some, disk read). |
+| Known cost of the solution | `urgent` mode (swappiness 40, cache 150) can pay fsync spikes under concurrent eMMC I/O. Published as is. |
 
-Le démon ne change rien tant que la RAM suffit. Dès que la marge se resserre, il adapte les valeurs (10, 25 ou 40 selon la strate, garde anti-saturation à 15) là où Debian garde toujours 60.
+The daemon changes nothing while RAM is enough. Once the margin tightens, it adapts the values (10, 25 or 40 depending on tier, an anti-thrash guard at 15) where Debian always keeps 60.
 
-## Licence
+## License
 
-MIT, voir [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).
