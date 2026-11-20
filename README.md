@@ -84,8 +84,10 @@ ram-swap-policy [--dry-run] [--json] [--watch] [--interval 5] [--proc /proc] [--
 Une ligne de journal ne sort que quand le niveau, le swappiness, la pression de cache ou `page-cluster` change :
 
 ```text
-active swappiness=10 cache=50 cluster=4 dispo=2367 Mio swap=6/8191 Mio — strate active : la RAM conserve ce qui est utile dans l'immédiat
+active swappiness=10 cache=50 cluster=4 dispo=2367 Mio swap=6/8191 Mio
 ```
+
+La ligne se termine par la raison du niveau.
 
 `SIGTERM` et `SIGINT` terminent la boucle proprement, après le sommeil de l'intervalle.
 
@@ -101,11 +103,11 @@ make test
 
 Trois harnais livrés avec le projet :
 
-- `bench_ram_swap.py` — micro-benchmark d'une version du module : coût d'une itération lecture+décision, détail des parses, latence d'une invocation complète. Accepte un chemin de module pour comparer deux versions : `python3 bench_ram_swap.py /chemin/vers/autre_ram_swap.py`
-- `bench_systeme.py` — benchmark système d'une configuration : hog de 4 Gio churné, latence de refault 4 KiB aléatoire sur une région poussée en swap par `MADV_PAGEOUT` (étalonnée contre la même tournée en RAM), échantillonnage du swappiness effectif et de la PSI à 0,5 s
-- `bench_reel.py` — benchmark d'usage réel : des applications d'arrière-plan (zone chaude réécrite souvent, zone froide abandonnée) occupent la RAM pendant que le harnais mesure les latences perçues : lancement d'un outil, sauvegarde d'un petit fichier (fsync), débit de lecture disque
-- `bench_sature.py` — benchmark créatif de saturation : outils de design web réels (Photopea, Excalidraw) et onglets chargés dans Chrome headless, modèles de documents en RAM touchés en continu, pendant que trois builds gcc doivent aboutir
-- `bench_recap.py` — synthèse agrégée des runs de `resultats/`
+- `bench_ram_swap.py` mesure une version du module : coût d'une itération lecture+décision, détail des parses, latence d'une invocation complète. Accepte un chemin de module pour comparer deux versions : `python3 bench_ram_swap.py /chemin/vers/autre_ram_swap.py`
+- `bench_systeme.py` mesure une configuration sous thrash : hog de 4 Gio churné, latence de refault 4 KiB aléatoire sur une région poussée en swap par `MADV_PAGEOUT` (étalonnée contre la même tournée en RAM), échantillonnage du swappiness effectif et de la PSI à 0,5 s
+- `bench_reel.py` mesure l'usage réel : des applications d'arrière-plan (zone chaude réécrite souvent, zone froide abandonnée) occupent la RAM pendant que le harnais relève les latences perçues, lancement d'un outil, sauvegarde d'un petit fichier (fsync) et débit de lecture disque
+- `bench_sature.py` sature délibérément : outils de design web réels (Photopea, Excalidraw) et onglets chargés dans Chrome headless, modèles de documents en RAM touchés en continu, pendant que trois builds gcc doivent aboutir
+- `bench_recap.py` synthétise les runs de `resultats/`
 
 ## Benchmark
 
@@ -124,9 +126,9 @@ Sur la machine de référence, 300 itérations, 15 invocations :
 | Mesure | Valeur |
 |---|---|
 | Itération lecture `/proc` + décision (médiane) | ~500 µs, p95 719 µs |
-| — parse `meminfo` | 32 µs |
-| — parse `pressure` | 4 µs |
-| — parse `vmstat` | 66 µs |
+| dont parse `meminfo` | 32 µs |
+| dont parse `pressure` | 4 µs |
+| dont parse `vmstat` | 66 µs |
 | Invocation `--dry-run --json` complète (médiane) | 137 ms, p95 147 ms |
 | Démarrage Python nu (référence) | 43 ms |
 | Service en production | 7,6 Mio RSS, ~0,11 % de CPU sur 2 h 20 |
@@ -139,7 +141,7 @@ Par run, à configuration égale : purge des caches, hog anonyme de 4 Gio touch�
 
 ### Résultats par run
 
-**solution-run1** — sysctl début `10/50/4`, fin `40/150/4` (strate `urgent`) :
+**solution-run1** (sysctl début `10/50/4`, fin `40/150/4`, strate `urgent`) :
 
 | Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
@@ -148,7 +150,7 @@ Par run, à configuration égale : purge des caches, hog anonyme de 4 Gio touch�
 
 Refault 4 KiB : 1,8 µs médiane, p95 3,2 µs. Montée en charge : 13,0 s.
 
-**natif-run1** — sysctl constants `60/100/3` :
+**natif-run1** (sysctl constants `60/100/3`) :
 
 | Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
@@ -157,7 +159,7 @@ Refault 4 KiB : 1,8 µs médiane, p95 3,2 µs. Montée en charge : 13,0 s.
 
 Refault 4 KiB : 1,7 µs médiane, p95 3,1 µs. Montée en charge : 12,1 s.
 
-**solution-run2** — sysctl début `10/50/4`, fin `15/100/4` (strate `sature`) :
+**solution-run2** (sysctl début `10/50/4`, fin `15/100/4`, strate `sature`) :
 
 | Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
@@ -166,7 +168,7 @@ Refault 4 KiB : 1,7 µs médiane, p95 3,1 µs. Montée en charge : 12,1 s.
 
 Refault 4 KiB : 1,8 µs médiane, p95 2,8 µs. Montée en charge : 12,3 s.
 
-**natif-run2** — sysctl constants `60/100/3` :
+**natif-run2** (sysctl constants `60/100/3`) :
 
 | Passe | Durée | Débit | pswpin | pswpout | PSI some | PSI full |
 |---|---|---|---|---|---|---|
@@ -191,7 +193,7 @@ Médianes des passes, 2 runs par configuration :
 ### Lecture des résultats
 
 1. **Le gain net de la solution est le débit soutenu.** Les deux configurations déplacent les mêmes volumes (~8,5 Gio in/out par passe) mais la solution les déplace 17 à 21 % plus vite. Le facteur identifié est `page-cluster` : 64 Kio de readahead contre 32 Kio au natif. Une mesure antérieure sur le même matériel donnait ~220 Mo/s de swap-in séquentiel à cluster 4 contre ~137 Mo/s à cluster 3, même direction.
-2. **Le natif se dégrade, la solution tient.** Les passes natives ralentissent de run en run (256 → 278 → 325 s) tandis que la solution reste dans un bandeau serré (211-249 s). La stratégie adaptative a varié intelligemment : strate `urgent` (40/150) au premier run, strate `sature` (15/100) au second — le garde anti-tempête réduit le swappiness quand le swap déplace déjà trop.
+2. **Le natif se dégrade, la solution tient.** Les passes natives ralentissent de run en run (256 → 278 → 325 s) tandis que la solution reste dans un bandeau serré (211-249 s). La stratégie adaptative a varié selon le profil de la tempête : strate `urgent` (40/150) au premier run, strate `sature` (15/100) au second, quand le swap déplace déjà trop et que des tâches sont bloquées.
 3. **L'interactivité (PSI) est une égalité** sous ce thrash extrême, et le refault aléatoire aussi : pas de gain inventé là où il n'y en a pas. La valeur calme du démon (swappiness 10 contre 60 au quotidien) n'est pas exercée par ce test ; elle repose sur le profil de la machine (~133 Mio de pages anonymes, plafond qui maintient 10 hors urgence).
 
 ### Réserves
@@ -200,9 +202,9 @@ Médianes des passes, 2 runs par configuration :
 
 ### Usage réel : poste contraint, latences perçues
 
-Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe la RAM comme des applications ouvertes — chacune avec une zone chaude réécrite toutes les 150 ms et une zone froide abandonnée — et mesure 50 fois, toutes les 2 s, ce qu'un utilisateur ressent : lancement d'un interpréteur Python, sauvegarde d'un fichier de 64 Kio avec `fsync` sur l'eMMC, débit de lecture disque. Le harnais abandonne la mesure si un ouvrier meurt : la charge doit être tenue du début à la fin. Deux scénarios, deux paires entrelacées solution/natif, 50 échantillons par run.
+Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe la RAM comme des applications ouvertes, chacune avec une zone chaude réécrite toutes les 150 ms et une zone froide abandonnée, et mesure 50 fois, toutes les 2 s, ce qu'un utilisateur ressent : lancement d'un interpréteur Python, sauvegarde d'un fichier de 64 Kio avec `fsync` sur l'eMMC, débit de lecture disque. Le harnais abandonne la mesure si un ouvrier meurt : la charge doit être tenue du début à la fin. Deux scénarios, deux paires entrelacées solution/natif, 50 échantillons par run.
 
-**Scénario modéré** — 2 applications × 600 Mio, RAM disponible médiane 9-10 %. Attention : ce couple de runs est biaisé par l'ordre (pas de remise à zéro du swap entre eux ; le natif héritait de la marge libérée par le swap-out de la solution qui tournait juste avant). Les chiffres restent publiés pour ce qu'ils sont :
+**Scénario modéré** : 2 applications × 600 Mio, RAM disponible médiane 9-10 %. Attention : ce couple de runs est biaisé par l'ordre (pas de remise à zéro du swap entre eux ; le natif héritait de la marge libérée par le swap-out de la solution qui tournait juste avant). Les chiffres restent publiés pour ce qu'ils sont :
 
 | Métrique (médiane) | Solution (`urgent` 40/150) | Natif (60/100/3) |
 |---|---|---|
@@ -212,7 +214,7 @@ Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe 
 | Swap in / out | 42 / **387 Mio** | 18 / 0 Mio |
 | PSI some / full | 1,8 / 1,4 s | 0,1 / 0,1 s |
 
-**Scénario chargé** — 3 applications × 500 Mio, RAM disponible médiane 2,5-4 %, swap remis à zéro avant chaque run (paire propre) :
+**Scénario chargé** : 3 applications × 500 Mio, RAM disponible médiane 2,5-4 %, swap remis à zéro avant chaque run (paire propre) :
 
 | Métrique (médiane) | Solution (`urgent` 40/150) | Natif (60/100/3) |
 |---|---|---|
@@ -227,7 +229,7 @@ Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe 
 1. La paire propre (scénario chargé) donne la solution meilleure ou égale sur tout ce qui se perçoit : sauvegardes 18 % plus rapides, lectures +16 %, 27 % de pages en moins déplacées vers le swap, mêmes quasi-absence de gels. Le lancement d'outil est une égalité (1 %).
 2. La paire modérée, biaisée par l'ordre, dit malgré tout une chose vraie : le mode `urgent` du démon (swappiness 40, cache 150) peut payer des pics de fsync (p95 170 ms) quand l'éviction agressive et l'I/O eMMC se superposent. C'est le coût réel de sa réactivité, publié tel quel.
 3. Dans les deux runs de la solution, le démon a détecté la pression réelle et monté en `urgent` (10→40, cache 150), puis y est resté par hystérésis. Au natif, rien ne réagit : les valeurs restent 60/100/3 du début à la fin.
-4. Correction de méthode publiée pour rester honnête : la première version de ce protocole mesurait une machine quasi au repos — les ouvriers mouraient ~150 ms après le départ (bug de tranche `mmap` sur une zone partielle), la charge n'était jamais tenue, et les chiffres « aucune config n'échange » décrivaient du vide. Le harnais est corrigé (écriture à longueur exacte, arrêt partagé entre processus, garde de survie) et couvert par 9 tests dédiés.
+4. Correction de méthode publiée pour rester honnête : la première version de ce protocole mesurait une machine quasi au repos. Les ouvriers mouraient ~150 ms après le départ (bug de tranche `mmap` sur une zone partielle), la charge n'était jamais tenue, et les chiffres « aucune config n'échange » décrivaient du vide. Le harnais est corrigé (écriture à longueur exacte, arrêt partagé entre processus, garde de survie) et couvert par 9 tests dédiés.
 
 ### Saturation créative : design web + onglets + build de dev
 
@@ -258,8 +260,8 @@ Un couple de runs seulement : lecture indicative, pas statistique.
 | Saturation créative (design web + onglets + builds) | **Les deux tiennent** : zéro OOM, tous les builds réussissent, ~2,8 Gio poussés dans le swap. Petits avantages solution dans la profondeur (build 8,3 s contre 10,9 s, fsync p95 +36 % mieux), deux petits avantages natifs (PSI some, lecture). |
 | Coût connu de la solution | Le mode `urgent` (swappiness 40, cache 150) peut payer des pics de fsync sous I/O eMMC simultanée. Publié tel quel. |
 
-La valeur du démon se joue en dessous de la ligne de flottaison : au-dessus, il ne touche à rien ; en dessous, il adapte (10 → 25 → 40 selon la strate, garde anti-saturation à 15) là où le natif reste figé à un compromis généraliste.
+Le démon ne change rien tant que la RAM suffit. Dès que la marge se resserre, il adapte les valeurs (10, 25 ou 40 selon la strate, garde anti-saturation à 15) là où Debian garde toujours 60.
 
 ## Licence
 
-MIT — voir [LICENSE](LICENSE).
+MIT, voir [LICENSE](LICENSE).
