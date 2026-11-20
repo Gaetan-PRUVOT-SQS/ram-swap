@@ -104,6 +104,7 @@ Trois harnais livrés avec le projet :
 - `bench_ram_swap.py` — micro-benchmark d'une version du module : coût d'une itération lecture+décision, détail des parses, latence d'une invocation complète. Accepte un chemin de module pour comparer deux versions : `python3 bench_ram_swap.py /chemin/vers/autre_ram_swap.py`
 - `bench_systeme.py` — benchmark système d'une configuration : hog de 4 Gio churné, latence de refault 4 KiB aléatoire sur une région poussée en swap par `MADV_PAGEOUT` (étalonnée contre la même tournée en RAM), échantillonnage du swappiness effectif et de la PSI à 0,5 s
 - `bench_reel.py` — benchmark d'usage réel : des applications d'arrière-plan (zone chaude réécrite souvent, zone froide abandonnée) occupent la RAM pendant que le harnais mesure les latences perçues : lancement d'un outil, sauvegarde d'un petit fichier (fsync), débit de lecture disque
+- `bench_sature.py` — benchmark créatif de saturation : outils de design web réels (Photopea, Excalidraw) et onglets chargés dans Chrome headless, modèles de documents en RAM touchés en continu, pendant que trois builds gcc doivent aboutir
 - `bench_recap.py` — synthèse agrégée des runs de `resultats/`
 
 ## Benchmark
@@ -227,6 +228,26 @@ Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe 
 2. La paire modérée, biaisée par l'ordre, dit malgré tout une chose vraie : le mode `urgent` du démon (swappiness 40, cache 150) peut payer des pics de fsync (p95 170 ms) quand l'éviction agressive et l'I/O eMMC se superposent. C'est le coût réel de sa réactivité, publié tel quel.
 3. Dans les deux runs de la solution, le démon a détecté la pression réelle et monté en `urgent` (10→40, cache 150), puis y est resté par hystérésis. Au natif, rien ne réagit : les valeurs restent 60/100/3 du début à la fin.
 4. Correction de méthode publiée pour rester honnête : la première version de ce protocole mesurait une machine quasi au repos — les ouvriers mouraient ~150 ms après le départ (bug de tranche `mmap` sur une zone partielle), la charge n'était jamais tenue, et les chiffres « aucune config n'échange » décrivaient du vide. Le harnais est corrigé (écriture à longueur exacte, arrêt partagé entre processus, garde de survie) et couvert par 9 tests dédiés.
+
+### Saturation créative : design web + onglets + build de dev
+
+La question posée : la machine et le swap tiennent-ils un poste créatif exigeant ? Scénario : 6 onglets Chrome headless (Photopea, deux Excalidraw, trois articles Wikipédia chargés), trois « modèles de documents » de 600 Mio touchés en continu (les calques d'un fichier de design), et pendant ce temps trois builds gcc de 80 fichiers qui doivent réussir. Remise à zéro du swap avant chaque run, 8 Go de RAM sur 8 Gio de swap.
+
+| Métrique | Solution (`urgent` 40 → `archive` 25) | Natif (60/100/3) |
+|---|---|---|
+| Builds réussis | 3/3 | 3/3 |
+| Durées de build | 19,6 / 10,6 / **8,3 s** | 20,1 / 9,9 / 10,9 s |
+| Sauvegarde fsync (médiane / p95) | **62,1 ms / 205 ms** | 68,4 ms / 319 ms |
+| Lancement outil | 85,5 ms | 85,6 ms |
+| Lecture disque | 402 Mio/s | 437 Mio/s |
+| Swap in / out | 179 / 2 850 Mio | 93 / 2 811 Mio |
+| PSI some / full | 10,4 / 4,4 s | 7,5 / 4,1 s |
+| OOM | 0 | 0 |
+| RAM disponible minimale | 9,4 % | 9,4 % |
+
+Les deux configurations tiennent le scénario : aucun OOM, tous les builds réussissent, tous les process survivent. La solution garde deux petits avantages dans la profondeur de la saturation : le troisième build (8,3 s contre 10,9 s) et la queue des sauvegardes (p95 +36 % mieux), cohérents avec le readahead 64 Kio mesuré plus haut ; le natif garde des micro-gels cumulés un peu plus faibles. Le démon a suivi la courbe de pression (montée `urgent` 40 au pic, retour `archive` 25 ensuite) quand le natif restait figé à 60.
+
+Un couple de runs seulement : lecture indicative, pas statistique.
 
 ## Licence
 
