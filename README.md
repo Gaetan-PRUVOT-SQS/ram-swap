@@ -249,6 +249,17 @@ Les deux configurations tiennent le scénario : aucun OOM, tous les builds réus
 
 Un couple de runs seulement : lecture indicative, pas statistique.
 
+### Bilan des trois régimes
+
+| Régime | Verdict |
+|---|---|
+| Quotidien calme à modéré (usage réel, dispo > 9 %) | Égalité : aucune config n'échange beaucoup, latences perçues indiscernables. La solution ne dégrade rien et reste à swappiness 10 tant que la machine respire. |
+| Pénurie (churn forcé, thrash) | **Solution +20 % de débit soutenu** (74,4 contre 61,7 Mio/s) grâce au readahead 64 Kio ; le natif se dégrade de passe en passe, la solution tient son bandeau. |
+| Saturation créative (design web + onglets + builds) | **Les deux tiennent** : zéro OOM, tous les builds réussissent, ~2,8 Gio poussés dans le swap. Petits avantages solution dans la profondeur (build 8,3 s contre 10,9 s, fsync p95 +36 % mieux), deux petits avantages natifs (PSI some, lecture). |
+| Coût connu de la solution | Le mode `urgent` (swappiness 40, cache 150) peut payer des pics de fsync sous I/O eMMC simultanée. Publié tel quel. |
+
+La valeur du démon se joue en dessous de la ligne de flottaison : au-dessus, il ne touche à rien ; en dessous, il adapte (10 → 25 → 40 selon la strate, garde anti-saturation à 15) là où le natif reste figé à un compromis généraliste.
+
 ## Licence
 
 MIT — voir [LICENSE](LICENSE).
