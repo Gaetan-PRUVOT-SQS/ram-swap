@@ -20,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+from multiprocessing.synchronize import Event as EventPartage
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -32,22 +33,28 @@ FICHIER_FSYNC = Path(__file__).parent / "resultats" / "fsync.tmp"
 DOSSIER_LECTURE = Path("/usr/lib/python3.13")
 
 
-def ouvrier(taille: int, arret: threading.Event) -> None:
+def ecrire(mm: mmap.mmap, zeros: bytes, debut: int, fin: int) -> None:
+    o = debut
+    while o < fin:
+        n = min(CHUNK, fin - o)
+        mm[o : o + n] = zeros[:n]
+        o += n
+
+
+def ouvrier(taille: int, arret: EventPartage, chaud: int | None = None) -> None:
+    chaud = ZONE_CHAUTE_MIO * 1024 * 1024 if chaud is None else chaud
     zeros = bytes(CHUNK)
     mm = mmap.mmap(-1, taille)
-    for o in range(0, taille, CHUNK):
-        mm[o : o + CHUNK] = zeros[: min(CHUNK, taille - o)]
-    chaud = ZONE_CHAUTE_MIO * 1024 * 1024
+    ecrire(mm, zeros, 0, taille)
     while not arret.is_set():
         echeance = time.monotonic() + 0.15
-        for o in range(0, chaud, CHUNK):
-            mm[o : o + CHUNK] = zeros[: min(CHUNK, chaud - o)]
+        ecrire(mm, zeros, 0, chaud)
         arret.wait(max(0.02, echeance - time.monotonic()))
     mm.close()
 
 
-def lancer_ouvriers(nb: int, mio: int) -> tuple[list[multiprocessing.Process], threading.Event]:
-    arret = threading.Event()
+def lancer_ouvriers(nb: int, mio: int) -> tuple[list[multiprocessing.Process], EventPartage]:
+    arret = multiprocessing.Event()
     taille = mio * 1024 * 1024
     processus = []
     for _ in range(nb):
@@ -153,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
 
     processus, arret = lancer_ouvriers(args.ouvriers, args.mio_par_ouvrier)
     time.sleep(8)
+    if not all(p.is_alive() for p in processus):
+        raise RuntimeError("un ouvrier est mort pendant la montée en charge : mesure annulée")
 
     spawns: list[float] = []
     fsyncs: list[float] = []
@@ -166,6 +175,9 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(args.periode)
     releves = list(sonde.releves)
     arret.set()
+    morts = sum(1 for p in processus if p.exitcode not in (None, 0))
+    if morts:
+        raise RuntimeError(f"{morts} ouvrier(s) mort(s) pendant la mesure : résultats invalides")
     for p in processus:
         p.join(timeout=5)
         if p.is_alive():

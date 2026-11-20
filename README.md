@@ -92,10 +92,10 @@ active swappiness=10 cache=50 cluster=4 dispo=2367 Mio swap=6/8191 Mio — strat
 ## Tests
 
 ```sh
-python3 -m unittest test_ram_swap
+python3 -m unittest test_ram_swap test_bench_reel
 ```
 
-22 tests : parse de `/proc`, les six niveaux, les deux plafonds, l'hystérésis des trois seuils de RAM, la relecture d'un ancien fichier d'état et l'aller-retour du format nouveau. Suite verte en ~7 ms.
+31 tests : pour l'outil, parse de `/proc`, les six niveaux, les deux plafonds, l'hystérésis des trois seuils de RAM, la relecture d'un ancien fichier d'état et l'aller-retour du format nouveau ; pour le harnais d'usage réel, les quantiles, la survie de l'ouvrier sur des tranches de mémoire partielles et les mesures ponctuelles. Suite verte en ~0,5 s.
 
 ## Outils de mesure
 
@@ -199,25 +199,34 @@ Médianes des passes, 2 runs par configuration :
 
 ### Usage réel : poste contraint, latences perçues
 
-Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe la RAM comme des applications ouvertes — chacune avec une zone chaude réécrite toutes les 150 ms et une zone froide abandonnée — et mesure 50 fois, toutes les 2 s, ce qu'un utilisateur ressent : lancement d'un interpréteur Python, sauvegarde d'un fichier de 64 Kio avec `fsync` sur l'eMMC, débit de lecture disque. Deux scénarios, deux paires entrelacées solution/natif, 50 échantillons par run.
+Le thrash forcé ci-dessus ne dit rien du quotidien. Ce second protocole occupe la RAM comme des applications ouvertes — chacune avec une zone chaude réécrite toutes les 150 ms et une zone froide abandonnée — et mesure 50 fois, toutes les 2 s, ce qu'un utilisateur ressent : lancement d'un interpréteur Python, sauvegarde d'un fichier de 64 Kio avec `fsync` sur l'eMMC, débit de lecture disque. Le harnais abandonne la mesure si un ouvrier meurt : la charge doit être tenue du début à la fin. Deux scénarios, deux paires entrelacées solution/natif, 50 échantillons par run.
 
-**Scénario modéré** — 2 applications × 600 Mio (~76 % de RAM, dispo restée à 22-26 %) :
+**Scénario modéré** — 2 applications × 600 Mio, RAM disponible médiane 9-10 %. Attention : ce couple de runs est biaisé par l'ordre (pas de remise à zéro du swap entre eux ; le natif héritait de la marge libérée par le swap-out de la solution qui tournait juste avant). Les chiffres restent publiés pour ce qu'ils sont :
 
-| Métrique (médiane) | Solution | Natif | Swap |
-|---|---|---|---|
-| Lancement outil | 53,3 ms | 50,3 ms | 0 / 0 |
-| Sauvegarde fsync | 12,5 ms | 14,4 ms | 0 / 0 |
-| Lecture disque | 680 Mio/s | 661 Mio/s | — |
+| Métrique (médiane) | Solution (`urgent` 40/150) | Natif (60/100/3) |
+|---|---|---|
+| Lancement outil | 52,1 ms | 51,0 ms |
+| Sauvegarde fsync | 16,4 ms (p95 170, max 304) | 12,7 ms (p95 19,8, max 38) |
+| Lecture disque | 584 Mio/s | 725 Mio/s |
+| Swap in / out | 42 / **387 Mio** | 18 / 0 Mio |
+| PSI some / full | 1,8 / 1,4 s | 0,1 / 0,1 s |
 
-**Scénario chargé** — 3 applications × 500 Mio (~85 % de RAM, dispo 14-22 %) :
+**Scénario chargé** — 3 applications × 500 Mio, RAM disponible médiane 2,5-4 %, swap remis à zéro avant chaque run (paire propre) :
 
-| Métrique (médiane) | Solution | Natif | Swap |
-|---|---|---|---|
-| Lancement outil | 51,4 ms | 53,1 ms | 8 / 0 vs 2 / 0 Mio |
-| Sauvegarde fsync | 13,2 ms (p95 22,7) | 12,2 ms (p95 33,5, pic 194) | — |
-| Lecture disque | 620 Mio/s | 589 Mio/s | — |
+| Métrique (médiane) | Solution (`urgent` 40/150) | Natif (60/100/3) |
+|---|---|---|
+| Lancement outil | 50,2 ms | 49,7 ms |
+| Sauvegarde fsync | **12,8 ms** (p95 24,5) | 15,6 ms (p95 27,5, max 137) |
+| Lecture disque | **777 Mio/s** | 667 Mio/s |
+| Swap in / out | 0 / **176 Mio** | 0 / 241 Mio |
+| PSI some / full | 0,1 / 0,1 s | 0,1 / 0,1 s |
 
-**Lecture.** Jusqu'à ~90 % de RAM occupée, aucune des deux configurations n'échange significativement et les latences perçues restent dans le bruit l'une de l'autre : le MGLRU du noyau 6.6 tient cette plage dans les deux cas. La solution ne dégrade rien au quotidien, et sa marge se joue en dessous — le régime de pénurie mesuré au benchmark système. Un détail notable : le run natif chargé finit avec la plus faible marge de RAM disponible (14,4 % contre 22,3 % pour la solution) et le seul pic de sauvegarde marqué (194 ms), à prendre comme indicateur, pas comme preuve (échantillon court, remplissage légèrement différent entre paires).
+**Lecture.**
+
+1. La paire propre (scénario chargé) donne la solution meilleure ou égale sur tout ce qui se perçoit : sauvegardes 18 % plus rapides, lectures +16 %, 27 % de pages en moins déplacées vers le swap, mêmes quasi-absence de gels. Le lancement d'outil est une égalité (1 %).
+2. La paire modérée, biaisée par l'ordre, dit malgré tout une chose vraie : le mode `urgent` du démon (swappiness 40, cache 150) peut payer des pics de fsync (p95 170 ms) quand l'éviction agressive et l'I/O eMMC se superposent. C'est le coût réel de sa réactivité, publié tel quel.
+3. Dans les deux runs de la solution, le démon a détecté la pression réelle et monté en `urgent` (10→40, cache 150), puis y est resté par hystérésis. Au natif, rien ne réagit : les valeurs restent 60/100/3 du début à la fin.
+4. Correction de méthode publiée pour rester honnête : la première version de ce protocole mesurait une machine quasi au repos — les ouvriers mouraient ~150 ms après le départ (bug de tranche `mmap` sur une zone partielle), la charge n'était jamais tenue, et les chiffres « aucune config n'échange » décrivaient du vide. Le harnais est corrigé (écriture à longueur exacte, arrêt partagé entre processus, garde de survie) et couvert par 9 tests dédiés.
 
 ## Licence
 
